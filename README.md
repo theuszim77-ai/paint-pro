@@ -32,16 +32,20 @@ Para atualizar uma cópia clonada, feche o editor e execute `git pull` antes de 
 ## Ferramentas disponíveis
 
 - **Arquivo:** novo, abrir, salvar e salvar como PNG, JPEG ou BMP. Pergunta antes de descartar alterações não salvas.
-- **Desenho:** lápis, pincel redondo, caligrafia, marcador, borracha, balde com preenchimento contíguo, conta-gotas, texto e lupa.
+- **Desenho:** lápis, pincel redondo, caligrafia, marcador, borracha, balde com preenchimento contíguo, conta-gotas, texto editável no canvas e lupa.
 - **Formas:** linha, curva quadrática, elipse, retângulo, retângulo arredondado, polígono, triângulos, losango, pentágono, hexágono, quatro setas, estrelas, balões, coração e raio.
 - **Estilos:** contorno e preenchimento sólidos opcionais; espessuras de 1, 3, 5 e 8 pixels.
 - **Cores:** Cor 1 e Cor 2, paleta, troca de cores e seletor personalizado. Clique com o botão direito desenha com Cor 2. A borracha usa Cor 2.
-- **Seleção retangular:** arrastar para selecionar; arrastar dentro da seleção para movê-la; copiar, recortar, colar, apagar e cortar a imagem.
-- **Imagem:** redimensionamento em pixels, giro de 90°/180° e inversão horizontal/vertical.
+- **Seleção retangular:** arrastar para selecionar; arrastar dentro da seleção para movê-la; copiar, recortar, colar, apagar e cortar a imagem. No Windows, copiar também envia a seleção para outros aplicativos; colar aceita imagens da área de transferência do sistema. A tela cresce automaticamente para receber uma imagem maior.
+- **Imagem:** redimensionamento em pixels ou porcentagem, proporção opcionalmente travada, giro de 90°/180° e inversão horizontal/vertical. Arquivo → Tamanho da tela expande ou recorta sem esticar o conteúdo, com âncora no centro ou no canto superior esquerdo.
 - **Exibir:** zoom de 10% a 800%, ajuste à janela, régua em pixels, grade a partir de 400%, barra de status e tela inteira.
 - **Histórico:** desfazer/refazer com até 30 estados, limitado também por um orçamento de memória.
 
 Para desenhar uma curva, arraste a linha inicial, solte e faça um segundo arrasto para definir a curvatura. Para polígonos, clique nos vértices e pressione Enter para fechar. Escape cancela uma operação em andamento e sai da tela inteira.
+
+Para escrever, escolha Texto, clique no canvas e digite. A aba Texto permite escolher fonte, tamanho em pixels, negrito, itálico e fundo com Cor 2. Use Aplicar texto, Ctrl+Enter ou clique fora da caixa no canvas para confirmar. Escape cancela o texto sem alterar o desenho. Até confirmar, Ctrl+C/X/V/Z e Enter atuam na caixa de texto. Depois de aplicar, o texto vira pixels e pode ser desfeito pelo histórico.
+
+O histórico mantém Refazer ao cancelar uma forma e evita criar passos para preenchimentos que não alteram a imagem. Os botões Desfazer e Refazer ficam desabilitados quando não há ações disponíveis.
 
 Escolha a ferramenta antes de desenhar. Passe o mouse sobre os ícones para ver seus nomes. Para usar preenchimento em formas, selecione “Cor sólida” em Preenchimento; o interior usa Cor 2 e o contorno usa a cor do botão de desenho.
 
@@ -60,11 +64,12 @@ Escolha a ferramenta antes de desenhar. Passe o mouse sobre os ícones para ver 
 | Roda do mouse | Rolar verticalmente |
 | F11 / Escape | Tela inteira / sair e cancelar |
 | Enter | Fechar polígono |
+| Ctrl+Enter | Aplicar texto no canvas |
 
 ## Limitações conhecidas
 
-- Copiar e colar usam uma área de transferência interna ao Paint Pro; não integram imagens de outros aplicativos.
-- Texto é inserido em um diálogo e rasterizado; não possui edição posterior como objeto.
+- A integração para copiar imagens ao sistema é específica do Windows. Colar depende do suporte do Pillow à área de transferência do sistema. A cópia interna continua disponível como alternativa.
+- Texto é editável antes de aplicar e depois é rasterizado; não possui edição posterior como objeto. Fontes não instaladas usam uma alternativa disponível.
 - Seleção é retangular, sem seleção livre ou transparência. Transformações atuam na imagem inteira.
 - A curva usa um único ponto de controle. Não há todas as texturas de pincel, opções de impressão, inclinação ou integração Paint 3D do aplicativo de referência.
 - PNGs transparentes são abertos sobre branco. O documento é RGB, sem camadas.
@@ -83,7 +88,7 @@ Cobrem geometria, histórico, seleção e movimento, recorte, giro, redimensiona
 
 ## Arquivos
 
-`app.py` inicia a aplicação; `classic.py` contém a interface e os gestos; `document.py` contém geometria, documento e histórico. `native_backend.py` liga o editor ao módulo C++ em `native/`. `scripts/` contém ferramentas JavaScript. Os arquivos `test_*.py` contêm testes funcionais.
+`app.py` inicia a aplicação; `classic.py` contém a interface e os gestos; `document.py` contém geometria, documento e histórico. `editor_dialogs.py` fornece os diálogos de tamanho; `clipboard_bridge.py` integra imagens da área de transferência. `native_backend.py` liga o editor ao módulo C++ em `native/`. `scripts/` contém ferramentas JavaScript. Os arquivos `test_*.py` contêm testes funcionais.
 
 ## Python + C++ + JavaScript
 

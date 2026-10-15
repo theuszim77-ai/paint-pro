@@ -53,12 +53,18 @@ class DocumentTests(unittest.TestCase):
 class EditorTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
+        cls.clipboard_reader = patch('classic.read_image', return_value=None)
+        cls.clipboard_writer = patch('classic.write_image', return_value=True)
+        cls.clipboard_reader.start()
+        cls.clipboard_writer.start()
         cls.app = PaintPro()
         cls.app.update()
 
     @classmethod
     def tearDownClass(cls):
         cls.app.destroy()
+        cls.clipboard_reader.stop()
+        cls.clipboard_writer.stop()
 
     def setUp(self):
         self.app.cancel()
@@ -120,7 +126,9 @@ class EditorTests(unittest.TestCase):
         self.assertEqual(a.image.getpixel((0, 0)), (255, 0, 0))
         a.transform('right')
         self.assertEqual(a.image.size, (648, 1152))
-        with patch('classic.simpledialog.askinteger', side_effect=[200, 100]): a.resize_image()
+        with patch('classic.SizeDialog') as dialog:
+            dialog.return_value.result = ((200, 100), 'Superior esquerdo')
+            a.resize_image()
         self.assertEqual(a.image.size, (200, 100))
 
     def test_polygon_curve_text_and_zoom_coordinates(self):
@@ -135,8 +143,9 @@ class EditorTests(unittest.TestCase):
         a.pointer_up(self.event(140, 160))
         self.assertFalse(a.curve_stage)
         self.assertEqual(a.image.getpixel((140, 130)), (0, 0, 0))
-        with patch('classic.simpledialog.askstring', return_value='Teste'), patch('classic.simpledialog.askinteger', return_value=20):
-            self.gesture('text', (200, 200), (200, 200))
+        self.gesture('text', (200, 200), (200, 200))
+        a.text_editor.insert('1.0', 'Teste')
+        a.commit_text()
         self.assertIsNotNone(ImageChops.difference(a.image.crop((200, 200, 300, 250)), Image.new('RGB', (100, 50), 'white')).getbbox())
         a.set_zoom(4)
         a.scroll('x', 'moveto', .2)
@@ -161,6 +170,62 @@ class EditorTests(unittest.TestCase):
             self.assertFalse(a.doc.dirty)
             with patch('classic.filedialog.askopenfilename', return_value=path): a.open_file()
             self.assertEqual(a.image.size, (1152, 648))
+
+    def test_inline_text_commit_cancel_and_shortcuts(self):
+        a = self.app
+        a.select_tool('text')
+        a.add_text((20, 20))
+        a.text_editor.insert('1.0', 'Texto\nNo canvas')
+        self.assertFalse(a.doc.dirty)
+        a.text_bold.set(True)
+        a.text_italic.set(True)
+        a.text_size.set('32')
+        a.set_color('#ff0000')
+        a.update_text_font()
+        self.assertIsNone(a.shortcut(SimpleNamespace(widget=a.text_editor), 'delete', a.delete_selection))
+        a.set_zoom(2)
+        a.commit_text()
+        self.assertTrue(a.doc.dirty)
+        a.undo()
+        self.assertFalse(a.doc.dirty)
+        a.add_text((30, 30))
+        a.text_editor.insert('1.0', 'Cancelar')
+        a.cancel_text()
+        self.assertFalse(a.doc.dirty)
+        a.text_bold.set(False)
+        a.text_italic.set(False)
+        a.text_size.set('24')
+
+    def test_paste_external_expands_and_canvas_resize_undo(self):
+        a = self.app
+        with patch('classic.read_image', return_value=Image.new('RGB', (1200, 700), 'red')):
+            a.paste()
+        self.assertEqual(a.image.size, (1200, 700))
+        self.assertEqual(a.image.getpixel((1199, 699)), (255, 0, 0))
+        a.undo()
+        self.assertEqual(a.image.size, (1152, 648))
+
+        with patch('classic.SizeDialog') as dialog:
+            dialog.return_value.result = ((1252, 748), 'Centro')
+            a.resize_canvas()
+        self.assertEqual(a.image.size, (1252, 748))
+        a.undo()
+        self.assertEqual(a.image.size, (1152, 648))
+
+    def test_cancelled_shape_and_noop_fill_preserve_redo(self):
+        a = self.app
+        self.gesture('brush')
+        a.undo()
+        self.assertEqual(len(a.doc.redo_stack), 1)
+        a.select_tool('rectangle')
+        a.pointer_down(self.event(20, 20))
+        a.pointer_move(self.event(100, 100))
+        a.cancel()
+        self.assertEqual(len(a.doc.redo_stack), 1)
+        self.assertFalse(a.doc.dirty)
+        a.color = '#ffffff'
+        self.gesture('fill')
+        self.assertEqual(len(a.doc.redo_stack), 1)
 
 
 if __name__ == '__main__':

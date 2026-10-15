@@ -8,6 +8,8 @@ import customtkinter as ctk
 from PIL import Image, ImageDraw, ImageFont, ImageOps, ImageTk
 from document import Document, SHAPES, shape
 from native_backend import flood_fill
+from clipboard_bridge import read_image, write_image
+from editor_dialogs import SizeDialog
 
 PALETTE = ["#000000", "#7f7f7f", "#880015", "#ed1c24", "#ff7f27", "#fff200", "#22b14c", "#00a2e8", "#3f48cc", "#a349a4",
            "#ffffff", "#c3c3c3", "#b97a57", "#ffaec9", "#ffc90e", "#efe4b0", "#b5e61d", "#99d9ea", "#7092be", "#c8bfe7"]
@@ -35,8 +37,17 @@ class PaintPro(ctk.CTk):
         self.path_points = []
         self.curve_stage = False
         self.curve_ends = None
+        self.gesture_history = None
         self.gesture_color = self.color
         self.tk_image = None
+        self.text_editor = None
+        self.text_point = None
+        self.text_family = tk.StringVar(value='Arial')
+        self.text_size = tk.StringVar(value='24')
+        self.text_bold = tk.BooleanVar(value=False)
+        self.text_italic = tk.BooleanVar(value=False)
+        self.text_opaque = tk.BooleanVar(value=False)
+        self.text_color = self.color
         self.grid_on = tk.BooleanVar(value=False)
         self.rulers_on = tk.BooleanVar(value=False)
         self.status_on = tk.BooleanVar(value=True)
@@ -64,18 +75,23 @@ class PaintPro(ctk.CTk):
         quick = ctk.CTkFrame(self, height=30, corner_radius=0, fg_color="#f5f6f7")
         quick.grid(row=0, column=0, sticky="ew")
         for label, command in (("Salvar", self.save_file), ("↶", self.undo), ("↷", self.redo)):
-            self.button(quick, label, command, 46, 25).pack(side="left", padx=2)
+            button = self.button(quick, label, command, 46, 25)
+            button.pack(side="left", padx=2)
+            if label == '↶': self.undo_button = button
+            elif label == '↷': self.redo_button = button
         ctk.CTkLabel(quick, text="Paint Pro", font=("Segoe UI", 12)).pack(side="left", padx=14)
         tabs = ctk.CTkFrame(self, height=30, corner_radius=0, fg_color="#fafafa")
         tabs.grid(row=1, column=0, sticky="ew")
         ctk.CTkButton(tabs, text="Arquivo", command=self.file_menu, width=65, height=28, corner_radius=0, fg_color="#1979c4").pack(side="left")
         self.button(tabs, "Início", lambda: self.show_tab("home"), 65).pack(side="left")
         self.button(tabs, "Exibir", lambda: self.show_tab("view"), 65).pack(side="left")
+        self.button(tabs, 'Texto', lambda: self.select_tool('text'), 65).pack(side='left')
         self.ribbon = ctk.CTkFrame(self, corner_radius=0, fg_color="#f5f6f7", height=142)
         self.ribbon.grid(row=2, column=0, sticky="ew")
         self.ribbon.pack_propagate(False)
         self.home = ctk.CTkFrame(self.ribbon, fg_color="transparent")
         self.view = ctk.CTkFrame(self.ribbon, fg_color="transparent")
+        self.textbar = ctk.CTkFrame(self.ribbon, fg_color='transparent')
         self.home.pack(fill="both", expand=True)
 
         def group(title):
@@ -137,6 +153,17 @@ class PaintPro(ctk.CTk):
         self.button(colors, "Editar cores", self.choose_color, 80, 24).grid(row=2, column=1, columnspan=5)
         self.button(colors, "⇄", self.swap_colors, 35, 24).grid(row=2, column=0)
         self._color_buttons()
+        text_fields = ctk.CTkFrame(self.textbar, fg_color='transparent')
+        text_fields.pack(side='left', padx=20, pady=20)
+        ctk.CTkLabel(text_fields, text='Fonte').grid(row=0, column=0, sticky='w')
+        ctk.CTkOptionMenu(text_fields, variable=self.text_family, values=['Arial', 'Segoe UI', 'Times New Roman', 'Courier New'], command=lambda _v: self.update_text_font(), width=170).grid(row=1, column=0, padx=(0, 12))
+        ctk.CTkLabel(text_fields, text='Tamanho (px)').grid(row=0, column=1, sticky='w')
+        ctk.CTkComboBox(text_fields, variable=self.text_size, values=['12', '16', '20', '24', '32', '48', '72'], width=85, command=lambda _v: self.update_text_font()).grid(row=1, column=1)
+        self.text_size.trace_add('write', lambda *_: self.update_text_font())
+        for label, var in (('Negrito', self.text_bold), ('Itálico', self.text_italic), ('Fundo com Cor 2', self.text_opaque)):
+            ctk.CTkCheckBox(self.textbar, text=label, variable=var, command=self.update_text_font, width=100).pack(side='left', padx=10)
+        self.button(self.textbar, 'Aplicar texto', self.commit_text, 100, 36).pack(side='left', padx=12)
+        self.button(self.textbar, 'Cancelar', self.cancel_text, 80, 36).pack(side='left')
         for label, cmd in (("Ampliar", lambda: self.change_zoom(.25)), ("Reduzir", lambda: self.change_zoom(-.25)), ("100%", lambda: self.set_zoom(1)), ("Ajustar à janela", self.fit), ("Tela inteira", self.fullscreen)):
             self.button(self.view, label, cmd, 110, 56).pack(side="left", padx=6, pady=15)
         for label, var in (("Linhas de grade", self.grid_on), ("Réguas", self.rulers_on), ("Barra de status", self.status_on)):
@@ -194,19 +221,28 @@ class PaintPro(ctk.CTk):
 
     def _bind_shortcuts(self):
         for key, action in {"n": self.new_file, "o": self.open_file, "s": self.save_file, "z": self.undo, "y": self.redo, "c": self.copy, "x": self.cut, "v": self.paste, "a": self.select_all}.items():
-            self.bind(f"<Control-{key}>", lambda _e, f=action: f())
+            self.bind(f"<Control-{key}>", lambda e, f=action, k=key: self.shortcut(e, k, f))
         self.bind("<Control-Shift-S>", lambda _e: self.save_file(True))
-        self.bind("<Delete>", lambda _e: self.delete_selection())
+        self.bind("<Delete>", lambda e: self.shortcut(e, 'delete', self.delete_selection))
         self.bind("<Escape>", lambda _e: self.escape())
-        self.bind("<Return>", lambda _e: self.finish_polygon())
+        self.bind("<Return>", lambda e: self.shortcut(e, 'enter', self.finish_polygon))
+        self.bind('<Control-Return>', lambda _e: self.commit_text())
         self.bind("<F11>", lambda _e: self.fullscreen())
         self.bind("<Control-plus>", lambda _e: self.change_zoom(.25))
         self.bind("<Control-minus>", lambda _e: self.change_zoom(-.25))
 
+    def shortcut(self, event, key, action):
+        # Keep native editing shortcuts inside text fields and canvas text boxes.
+        if isinstance(event.widget, (tk.Text, tk.Entry)) and key in ('a', 'c', 'x', 'v', 'z', 'y', 'delete', 'enter'):
+            return
+        action()
+        return 'break'
+
     def show_tab(self, tab):
         self.home.pack_forget()
         self.view.pack_forget()
-        (self.home if tab == "home" else self.view).pack(fill="both", expand=True)
+        self.textbar.pack_forget()
+        {'home': self.home, 'view': self.view, 'text': self.textbar}[tab].pack(fill='both', expand=True)
 
     def menu(self, entries):
         menu = tk.Menu(self, tearoff=False)
@@ -218,7 +254,7 @@ class PaintPro(ctk.CTk):
             menu.grab_release()
 
     def file_menu(self):
-        self.menu((("Novo  Ctrl+N", self.new_file), ("Abrir  Ctrl+O", self.open_file), ("Salvar  Ctrl+S", self.save_file), ("Salvar como", lambda: self.save_file(True)), ("Sair", self.close)))
+        self.menu((("Novo  Ctrl+N", self.new_file), ("Abrir  Ctrl+O", self.open_file), ("Salvar  Ctrl+S", self.save_file), ("Salvar como", lambda: self.save_file(True)), ('Tamanho da tela', self.resize_canvas), ("Sair", self.close)))
 
     def rotate_menu(self):
         self.menu((("Girar 90° à direita", lambda: self.transform("right")), ("Girar 90° à esquerda", lambda: self.transform("left")), ("Girar 180°", lambda: self.transform("180")), ("Inverter horizontalmente", lambda: self.transform("horizontal")), ("Inverter verticalmente", lambda: self.transform("vertical"))))
@@ -230,6 +266,9 @@ class PaintPro(ctk.CTk):
     def activate_color(self, n):
         self.active_color = n
         self._color_buttons()
+        if self.text_editor:
+            self.text_color = self.color if self.active_color == 1 else self.secondary
+            self.update_text_font()
 
     def set_color(self, color, slot=None):
         if (slot or self.active_color) == 1:
@@ -237,16 +276,23 @@ class PaintPro(ctk.CTk):
         else:
             self.secondary = color
         self._color_buttons()
+        if self.text_editor:
+            self.text_color = self.color if (slot or self.active_color) == 1 else self.secondary
+            self.update_text_font()
 
     def swap_colors(self):
         self.color, self.secondary = self.secondary, self.color
         self._color_buttons()
+        if self.text_editor:
+            self.text_color = self.color if self.active_color == 1 else self.secondary
+            self.update_text_font()
 
     def choose_color(self):
         result = colorchooser.askcolor(self.color if self.active_color == 1 else self.secondary, parent=self)[1]
         if result: self.set_color(result)
 
     def select_tool(self, tool):
+        self.commit_text()
         if self.path_points: self.finish_polygon()
         self.cancel()
         self.tool = tool
@@ -254,6 +300,7 @@ class PaintPro(ctk.CTk):
             button.configure(fg_color="#c9e5f9" if name == tool else "transparent")
         self.canvas.configure(cursor="xterm" if tool == "text" else "crosshair")
         self._render()
+        if tool == 'text': self.show_tab('text')
 
     @property
     def origin(self):
@@ -268,6 +315,7 @@ class PaintPro(ctk.CTk):
     def pointer_down(self, event):
         point = self._canvas_point(event, False)
         if point is None: return
+        self.commit_text()
         self.canvas.focus_set()
         secondary = getattr(event, "num", 1) == 3
         self.gesture_color = self.secondary if secondary else self.color
@@ -278,6 +326,8 @@ class PaintPro(ctk.CTk):
             self.change_zoom(-.5 if secondary else .5)
             return
         if self.tool == "fill":
+            if self.image.getpixel(point) == Image.new('RGB', (1, 1), self.gesture_color).getpixel((0, 0)):
+                return
             self.doc.snapshot()
             self.image = flood_fill(self.image, point, self.gesture_color)
             self._render()
@@ -287,7 +337,7 @@ class PaintPro(ctk.CTk):
             return
         if self.tool == "polygon":
             if not self.path_points:
-                self.doc.snapshot()
+                self.begin_gesture_history()
                 self.preview_base = self.image.copy()
             self.path_points.append(point)
             self._render()
@@ -302,11 +352,11 @@ class PaintPro(ctk.CTk):
         if self.tool == "select":
             if self.selection and self.selection[0] <= point[0] < self.selection[2] and self.selection[1] <= point[1] < self.selection[3]:
                 self.drag_selection = self.selection
-                self.doc.snapshot()
+                self.begin_gesture_history()
             else: self.selection = None
         else:
             self.selection = None
-            self.doc.snapshot()
+            self.begin_gesture_history()
         if self.tool in ("brush", "pencil", "eraser"): self.pointer_move(event)
 
     def pointer_move(self, event):
@@ -359,6 +409,7 @@ class PaintPro(ctk.CTk):
             self._render()
             return
         self.curve_stage = False
+        self.finish_gesture_history()
         self.start = self.last = self.preview_base = self.drag_selection = None
         self._render()
 
@@ -370,6 +421,7 @@ class PaintPro(ctk.CTk):
             draw = ImageDraw.Draw(self.image)
             if self.fill_mode.get() == "Cor sólida": draw.polygon(self.path_points, fill=self.secondary)
             if self.outline_mode.get() == "Cor sólida": draw.line(self.path_points+[self.path_points[0]], fill=self.gesture_color, width=self.width.get(), joint="curve")
+        self.finish_gesture_history()
         self.path_points = []
         self.preview_base = None
         self._render()
@@ -381,27 +433,88 @@ class PaintPro(ctk.CTk):
             self.canvas.create_line(*coords, fill=self.gesture_color, width=max(1, self.width.get()*self.zoom), tags="polygon_preview")
 
     def cancel(self):
+        self.cancel_text()
         if self.preview_base and (self.start is not None or self.curve_stage or self.path_points): self.image = self.preview_base.copy()
+        if self.gesture_history is not None:
+            self.doc.undo_stack, self.doc.redo_stack = self.gesture_history
+            self.gesture_history = None
         self.start = self.last = self.preview_base = self.drag_selection = None
         self.path_points = []
         self.curve_stage = False
         self.selection = None
         self._render()
 
+    def begin_gesture_history(self):
+        self.gesture_history = (list(self.doc.undo_stack), list(self.doc.redo_stack))
+        self.doc.snapshot()
+
+    def finish_gesture_history(self):
+        if self.gesture_history is not None:
+            if self.preview_base and self.image.tobytes() == self.preview_base.tobytes():
+                self.doc.undo_stack, self.doc.redo_stack = self.gesture_history
+            self.gesture_history = None
+
     def escape(self):
         self.attributes("-fullscreen", False)
         self.cancel()
 
     def add_text(self, point):
-        text = simpledialog.askstring("Texto", "Texto para inserir:", parent=self)
-        if not text: return
-        size = simpledialog.askinteger("Texto", "Tamanho da fonte em pixels:", initialvalue=20, minvalue=6, maxvalue=300, parent=self)
-        if size is None: return
-        try: font = ImageFont.truetype("arial.ttf", size)
-        except OSError: font = ImageFont.load_default(size=size)
-        self.doc.snapshot()
-        ImageDraw.Draw(self.image).text(point, text, fill=self.gesture_color, font=font)
+        self.text_point = point
+        self.text_color = self.gesture_color
+        self.text_editor = tk.Text(self.canvas, undo=True, wrap='none', borderwidth=1, relief='solid', highlightthickness=1, highlightbackground='#1477cf', padx=0, pady=0)
+        self.text_editor.bind('<Control-Return>', lambda _e: (self.commit_text(), 'break')[1])
+        self.text_editor.bind('<Escape>', lambda _e: (self.cancel_text(), 'break')[1])
+        self.show_tab('text')
+        self.update_text_font()
         self._render()
+        self.text_editor.focus_set()
+
+    def text_pixel_size(self):
+        try: return max(6, min(300, int(self.text_size.get())))
+        except ValueError: return 24
+
+    def update_text_font(self):
+        if self.text_editor:
+            style = ('bold' if self.text_bold.get() else 'normal') + (' italic' if self.text_italic.get() else '')
+            self.text_editor.configure(font=(self.text_family.get(), -max(1, round(self.text_pixel_size()*self.zoom)), style), fg=self.text_color,
+                                       bg=self.secondary if self.text_opaque.get() else 'white')
+
+    def text_font(self):
+        bold, italic = self.text_bold.get(), self.text_italic.get()
+        suffix = 'bi' if bold and italic else 'bd' if bold else 'i' if italic else ''
+        names = {
+            'Arial': 'arial'+suffix+'.ttf',
+            'Segoe UI': 'segoeui'+('z' if bold and italic else 'b' if bold else 'i' if italic else '')+'.ttf',
+            'Times New Roman': 'times'+suffix+'.ttf',
+            'Courier New': 'cour'+suffix+'.ttf',
+        }
+        fallback = 'DejaVuSans'+('-BoldOblique' if bold and italic else '-Bold' if bold else '-Oblique' if italic else '')+'.ttf'
+        for name in (names[self.text_family.get()], fallback):
+            try: return ImageFont.truetype(name, self.text_pixel_size())
+            except OSError: pass
+        return ImageFont.load_default(size=self.text_pixel_size())
+
+    def commit_text(self):
+        if self.text_editor is None: return
+        value = self.text_editor.get('1.0', 'end-1c')
+        point = self.text_point
+        self.text_editor.destroy()
+        self.text_editor = self.text_point = None
+        if value.strip():
+            self.doc.snapshot()
+            draw = ImageDraw.Draw(self.image)
+            font = self.text_font()
+            box = draw.multiline_textbbox((0, 0), value, font=font, spacing=4)
+            if self.text_opaque.get():
+                draw.rectangle((point[0], point[1], point[0]+box[2]-box[0], point[1]+box[3]-box[1]), fill=self.secondary)
+            draw.multiline_text((point[0]-box[0], point[1]-box[1]), value, fill=self.text_color, font=font, spacing=4)
+        self._render()
+
+    def cancel_text(self):
+        if self.text_editor:
+            self.text_editor.destroy()
+            self.text_editor = self.text_point = None
+            self._render()
 
     def select_all(self):
         self.select_tool("select")
@@ -409,7 +522,9 @@ class PaintPro(ctk.CTk):
         self._render()
 
     def copy(self):
-        if self.selection: self.clip = self.image.crop(self.selection)
+        if self.selection:
+            self.clip = self.image.crop(self.selection)
+            write_image(self.clip, self.winfo_id())
 
     def cut(self):
         self.copy()
@@ -424,11 +539,22 @@ class PaintPro(ctk.CTk):
             self._render()
 
     def paste(self):
+        self.commit_text()
+        incoming = read_image()
+        if incoming is not None: self.clip = incoming
         if self.clip is None:
-            messagebox.showinfo("Colar", "Selecione e copie uma área no Paint Pro primeiro.", parent=self)
+            messagebox.showinfo("Colar", "Copie uma imagem de outro aplicativo ou uma seleção do Paint Pro.", parent=self)
             return
         self.select_tool("select")
+        size = max(self.image.width, self.clip.width), max(self.image.height, self.clip.height)
+        if size[0]*size[1] > self.doc.MAX_PIXELS:
+            messagebox.showerror('Colar', 'A imagem resultante excede 16 milhões de pixels.', parent=self)
+            return
         self.doc.snapshot()
+        if size != self.image.size:
+            expanded = Image.new('RGB', size, self.secondary)
+            expanded.paste(self.image, (0, 0))
+            self.image = expanded
         self.image.paste(self.clip, (0, 0))
         self.selection = (0, 0, min(self.clip.width, self.image.width), min(self.clip.height, self.image.height))
         self._render()
@@ -442,6 +568,7 @@ class PaintPro(ctk.CTk):
         else: messagebox.showinfo("Cortar", "Use Selecionar para marcar a área que deseja manter.", parent=self)
 
     def transform(self, action):
+        self.commit_text()
         self.cancel()
         self.doc.snapshot()
         if action in ("right", "left", "180"):
@@ -450,15 +577,27 @@ class PaintPro(ctk.CTk):
         self._render()
 
     def resize_image(self):
-        width = simpledialog.askinteger("Redimensionar", "Largura em pixels:", initialvalue=self.image.width, minvalue=1, maxvalue=16000, parent=self)
-        if width is None: return
-        height = simpledialog.askinteger("Redimensionar", "Altura em pixels:", initialvalue=round(self.image.height*width/self.image.width), minvalue=1, maxvalue=16000, parent=self)
-        if height is None: return
+        self.commit_text()
+        result = SizeDialog(self, self.image.size).result
+        if result is None: return
         try:
             self.cancel()
-            self.doc.resize((width, height))
+            self.doc.resize(result[0])
             self._render()
         except ValueError as error: messagebox.showerror("Redimensionar", str(error), parent=self)
+
+    def resize_canvas(self):
+        self.commit_text()
+        result = SizeDialog(self, self.image.size, canvas=True).result
+        if result is None: return
+        size, anchor = result
+        self.cancel()
+        self.doc.snapshot()
+        resized = Image.new('RGB', size, self.secondary)
+        offset = ((size[0]-self.image.width)//2, (size[1]-self.image.height)//2) if anchor == 'Centro' else (0, 0)
+        resized.paste(self.image, offset)
+        self.image = resized
+        self._render()
 
     def _render(self):
         if not hasattr(self, "status"): return
@@ -489,6 +628,12 @@ class PaintPro(ctk.CTk):
         self.status.configure(text=f"{self.image.width} × {self.image.height} px     |     {tool}{hint}")
         self.zoom_label.configure(text=f"{round(self.zoom*100)}%")
         self.zoom_slider.set(self.zoom*100)
+        self.undo_button.configure(state='normal' if self.doc.undo_stack else 'disabled')
+        self.redo_button.configure(state='normal' if self.doc.redo_stack else 'disabled')
+        if self.text_editor:
+            x, y = self.text_point
+            self.canvas.create_window(origin+x*self.zoom, origin+y*self.zoom, window=self.text_editor, anchor='nw',
+                                      width=max(30, min(420, (self.image.width-x)*self.zoom)), height=max(30, min(180, (self.image.height-y)*self.zoom)))
         self.title(f"{Path(self.doc.path).name if self.doc.path else 'Sem título'} — Paint Pro")
 
     def scroll(self, axis, *args):
@@ -502,6 +647,7 @@ class PaintPro(ctk.CTk):
 
     def set_zoom(self, value):
         self.zoom = max(.1, min(8, value))
+        self.update_text_font()
         self._render()
 
     def change_zoom(self, delta): self.set_zoom(self.zoom+delta)
@@ -519,6 +665,7 @@ class PaintPro(ctk.CTk):
     def fullscreen(self): self.attributes("-fullscreen", not self.attributes("-fullscreen"))
 
     def undo(self):
+        self.commit_text()
         self.cancel()
         self.doc.undo()
         self._render()
@@ -529,6 +676,7 @@ class PaintPro(ctk.CTk):
         self._render()
 
     def confirm_discard(self):
+        self.commit_text()
         if not self.doc.dirty: return True
         result = messagebox.askyesnocancel("Paint Pro", "Deseja salvar as alterações?", parent=self)
         return False if result is None else self.save_file() if result else True
@@ -552,6 +700,7 @@ class PaintPro(ctk.CTk):
             except (OSError, ValueError, Image.DecompressionBombError) as error: messagebox.showerror("Abrir", str(error), parent=self)
 
     def save_file(self, save_as=False):
+        self.commit_text()
         path = self.doc.path if not save_as else None
         if not path: path = filedialog.asksaveasfilename(parent=self, defaultextension=".png", filetypes=(("PNG", "*.png"), ("JPEG", "*.jpg"), ("Bitmap", "*.bmp")))
         if not path: return False
@@ -559,6 +708,7 @@ class PaintPro(ctk.CTk):
             if self.path_points: self.finish_polygon()
             # Keep the visible line/curve when saving during its second stage.
             self.curve_stage = False
+            self.finish_gesture_history()
             self.start = self.last = self.preview_base = None
             self.doc.save(path)
             self._render()
