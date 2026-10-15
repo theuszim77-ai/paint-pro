@@ -1,0 +1,16 @@
+{
+  "name": "paint-pro-desktop",
+  "version": "0.3.0",
+  "private": true,
+  "description": "JavaScript developer tools for the Python and C++ desktop editor",
+  "type": "module",
+  "engines": { "node": ">=20" },
+  "scripts": {
+    "start": "node scripts/dev.mjs start",
+    "test": "node scripts/dev.mjs test",
+    "test:js": "node --test scripts/dev.test.mjs",
+    "doctor": "node scripts/dev.mjs doctor",
+    "build:native": "node scripts/dev.mjs build-native",
+    "package": "node scripts/dev.mjs package"
+  }
+}

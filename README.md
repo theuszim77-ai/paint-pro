@@ -83,6 +83,42 @@ Cobrem geometria, histórico, seleção e movimento, recorte, giro, redimensiona
 
 ## Arquivos
 
-`app.py` inicia a aplicação; `classic.py` contém a interface e os gestos; `document.py` contém geometria, documento e histórico; `test_editor.py` contém os testes funcionais.
+`app.py` inicia a aplicação; `classic.py` contém a interface e os gestos; `document.py` contém geometria, documento e histórico. `native_backend.py` liga o editor ao módulo C++ em `native/`. `scripts/` contém ferramentas JavaScript. Os arquivos `test_*.py` contêm testes funcionais.
+
+## Python + C++ + JavaScript
+
+O aplicativo continua sendo desktop. Python cuida da interface e dos documentos; C++17 oferece uma implementação nativa do balde de tinta; JavaScript/Node automatiza execução, testes, compilação e pacote de código-fonte. As linguagens têm funções separadas e nenhuma dependência npm é necessária.
+
+### C++ opcional
+
+O editor procura a biblioteca compilada em `native/bin/`. Se ela não estiver disponível ou a operação nativa falhar, usa Pillow automaticamente. A implementação nativa trabalha em uma cópia da imagem, valida dimensões e não deixa exceções atravessarem a fronteira entre C++ e Python.
+
+Para compilar, instale CMake e um compilador C++17 (Visual Studio Build Tools no Windows, GCC/Clang no Linux ou Xcode Command Line Tools no macOS):
+
+```bash
+cmake -S native -B build/native -DCMAKE_BUILD_TYPE=Release
+cmake --build build/native --config Release
+python -m unittest -v
+```
+
+A biblioteca é específica do sistema e da arquitetura do Python. Compile no próprio computador. `PAINT_PRO_DISABLE_NATIVE=1` força Pillow; `PAINT_PRO_REQUIRE_NATIVE=1` faz os testes falharem se o C++ não carregar. Sem essa exigência, o teste de comparação nativa é ignorado quando a biblioteca não existe. Não é necessário compilar para abrir o aplicativo.
+
+### Ferramentas JavaScript
+
+Com Node.js 20 ou mais recente:
+
+```bash
+node scripts/dev.mjs doctor
+node scripts/dev.mjs start
+node scripts/dev.mjs test
+node scripts/dev.mjs build-native
+node scripts/dev.mjs package
+```
+
+`doctor` verifica as dependências e informa se o motor é C++17 ou Pillow. `test` executa os testes JavaScript e Python. `package` gera `dist/paint-pro-source.zip` contendo apenas os fontes permitidos; não inclui imagens do usuário, ambientes virtuais, credenciais ou bibliotecas compiladas. O pacote exige Python e dependências instalados para executar; não é um executável autônomo.
+
+Os mesmos comandos estão disponíveis como `npm start`, `npm test`, `npm run doctor`, `npm run build:native` e `npm run package`, caso npm esteja instalado. A variável `PAINT_PRO_PYTHON` permite escolher o caminho do Python do ambiente virtual.
+
+O fluxo `.github/workflows/ci.yml` verifica a versão Python/Pillow e a versão C++ no Linux, além das ferramentas JavaScript, a cada push ou pull request.
 
 Licença MIT, conforme [LICENSE](LICENSE).

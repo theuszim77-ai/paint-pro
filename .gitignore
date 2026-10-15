@@ -9,3 +9,10 @@ build/
 *.spec
 .DS_Store
 Thumbs.db
+node_modules/
+native/bin/
+*.dll
+*.so
+*.dylib
+.build-tools/
+.zig-cache/
