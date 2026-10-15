@@ -21,7 +21,7 @@ export function isSourceFile(path) {
   const normalized = path.split(sep).join('/');
   if (normalized.split('/').some(part => part.startsWith('.') && !['.github', '.gitignore'].includes(part))) return false;
   if (normalized.split('/').some(part => ['__pycache__', 'node_modules', 'build', 'bin', 'dist'].includes(part))) return false;
-  return ['app.py', 'classic.py', 'document.py', 'native_backend.py', 'test_editor.py', 'test_native.py',
+  return ['app.py', 'classic.py', 'document.py', 'native_backend.py', 'clipboard_bridge.py', 'editor_dialogs.py', 'test_editor.py', 'test_native.py', 'test_clipboard.py',
     'requirements.txt', 'README.md', 'LICENSE', '.gitignore', 'package.json'].includes(normalized)
     || /^(scripts\/[^/]+\.mjs|native\/(paintpro\.cpp|CMakeLists\.txt)|\.github\/workflows\/ci\.yml)$/.test(normalized);
 }
