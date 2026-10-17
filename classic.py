@@ -20,8 +20,8 @@ class PaintPro(ctk.CTk):
     def __init__(self):
         ctk.set_appearance_mode("light")
         super().__init__()
-        self.geometry("1320x850")
-        self.minsize(1160, 620)
+        self.geometry(f'{min(1380, self.winfo_screenwidth()-70)}x{min(880, self.winfo_screenheight()-90)}')
+        self.minsize(980, 580)
         self.configure(fg_color="#f0f0f0")
         self.doc = Document()
         self.tool = "brush"
@@ -48,13 +48,24 @@ class PaintPro(ctk.CTk):
         self.text_italic = tk.BooleanVar(value=False)
         self.text_opaque = tk.BooleanVar(value=False)
         self.text_color = self.color
+        self.space_down = self.panning = False
+        self._chrome_signature = None
+        self._dirty_display = False
+        self._help_window = None
         self.grid_on = tk.BooleanVar(value=False)
         self.rulers_on = tk.BooleanVar(value=False)
         self.status_on = tk.BooleanVar(value=True)
         self._build_ui()
         self._bind_shortcuts()
         self.protocol("WM_DELETE_WINDOW", self.close)
-        self.after(100, self._render)
+        self.update_idletasks()
+        self.fit()
+        self.after(300, self.install_icon)
+
+    def install_icon(self):
+        from ui_icons import icon
+        self.application_icon = ImageTk.PhotoImage(icon('palette', '#2563eb', 64))
+        self.iconphoto(True, self.application_icon)
 
     @property
     def image(self):
@@ -66,140 +77,17 @@ class PaintPro(ctk.CTk):
 
     def button(self, parent, text, command, width=60, height=28):
         return ctk.CTkButton(parent, text=text, command=command, width=width, height=height,
-                             fg_color="transparent", text_color="#202020", hover_color="#d9eafa",
-                             corner_radius=2, border_spacing=3, font=("Segoe UI", 12))
+                             fg_color="transparent", text_color="#25354a", hover_color="#eef4ff",
+                             corner_radius=6, border_spacing=4, font=("Segoe UI", 12))
 
     def _build_ui(self):
-        self.grid_columnconfigure(0, weight=1)
-        self.grid_rowconfigure(3, weight=1)
-        quick = ctk.CTkFrame(self, height=30, corner_radius=0, fg_color="#f5f6f7")
-        quick.grid(row=0, column=0, sticky="ew")
-        for label, command in (("Salvar", self.save_file), ("↶", self.undo), ("↷", self.redo)):
-            button = self.button(quick, label, command, 46, 25)
-            button.pack(side="left", padx=2)
-            if label == '↶': self.undo_button = button
-            elif label == '↷': self.redo_button = button
-        ctk.CTkLabel(quick, text="Paint Pro", font=("Segoe UI", 12)).pack(side="left", padx=14)
-        tabs = ctk.CTkFrame(self, height=30, corner_radius=0, fg_color="#fafafa")
-        tabs.grid(row=1, column=0, sticky="ew")
-        ctk.CTkButton(tabs, text="Arquivo", command=self.file_menu, width=65, height=28, corner_radius=0, fg_color="#1979c4").pack(side="left")
-        self.button(tabs, "Início", lambda: self.show_tab("home"), 65).pack(side="left")
-        self.button(tabs, "Exibir", lambda: self.show_tab("view"), 65).pack(side="left")
-        self.button(tabs, 'Texto', lambda: self.select_tool('text'), 65).pack(side='left')
-        self.ribbon = ctk.CTkFrame(self, corner_radius=0, fg_color="#f5f6f7", height=142)
-        self.ribbon.grid(row=2, column=0, sticky="ew")
-        self.ribbon.pack_propagate(False)
-        self.home = ctk.CTkFrame(self.ribbon, fg_color="transparent")
-        self.view = ctk.CTkFrame(self.ribbon, fg_color="transparent")
-        self.textbar = ctk.CTkFrame(self.ribbon, fg_color='transparent')
-        self.home.pack(fill="both", expand=True)
+        from studio_ui import build_ui
+        self.tool_names = TOOLS
+        build_ui(self)
 
-        def group(title):
-            frame = ctk.CTkFrame(self.home, fg_color="transparent", corner_radius=0, border_width=1, border_color="#dce0e5")
-            frame.pack(side="left", fill="y", padx=(0, 1))
-            body = ctk.CTkFrame(frame, fg_color="transparent")
-            body.pack(fill="both", expand=True, padx=5, pady=(5, 0))
-            ctk.CTkLabel(frame, text=title, height=19, font=("Segoe UI", 11), text_color="#666666").pack(side="bottom")
-            return body
-
-        clipboard = group("Área de Transferência")
-        self.button(clipboard, "▣\nColar", self.paste, 45, 64).grid(row=0, column=0, rowspan=2)
-        self.button(clipboard, "Recortar", self.cut, 60).grid(row=0, column=1)
-        self.button(clipboard, "Copiar", self.copy, 60).grid(row=1, column=1)
-        images = group("Imagem")
-        for i, (label, cmd) in enumerate((("Selecionar", lambda: self.select_tool("select")), ("Cortar", self.crop), ("Redimensionar", self.resize_image), ("Girar ▾", self.rotate_menu))):
-            self.button(images, label, cmd, 88, 26).grid(row=i//2, column=i%2, pady=4)
-        tools = group("Ferramentas")
-        self.tool_buttons = {}
-        for i, (tool, symbol) in enumerate(zip(("pencil", "fill", "text", "eraser", "picker", "magnify"), ("✎", "▨", "A", "▰", "⌖", "⊕"))):
-            button = self.button(tools, symbol, lambda t=tool: self.select_tool(t), 28, 28)
-            button.grid(row=i//3, column=i%3, padx=1, pady=2)
-            self.tooltip(button, TOOLS[tool])
-            self.tool_buttons[tool] = button
-        brush = group("Pincéis")
-        self.tool_buttons["brush"] = self.button(brush, "╱\nPincel", lambda: self.select_tool("brush"), 63, 52)
-        self.tool_buttons["brush"].pack()
-        self.option(brush, self.brush_mode, ["Pincel", "Caligrafia", "Marcador"], 92, lambda _v: self.select_tool("brush")).pack()
-        shapes = group("Formas")
-        gallery = ctk.CTkFrame(shapes, fg_color="white", corner_radius=0)
-        gallery.grid(row=0, column=0, rowspan=4)
-        self.icons = []
-        for i, tool in enumerate(SHAPES):
-            # Generate icons from the same original geometry; no external icon assets.
-            icon = Image.new("RGB", (22, 22), "white")
-            shape(icon, "line" if tool in ("curve", "polygon") else tool, (3, 3), (18, 18), "#243345", "white", 1)
-            image = ctk.CTkImage(icon, size=(18, 18))
-            self.icons.append(image)
-            b = self.button(gallery, "", lambda t=tool: self.select_tool(t), 23, 23)
-            b.configure(image=image)
-            b.grid(row=i//8, column=i%8)
-            self.tooltip(b, SHAPES[tool])
-            self.tool_buttons[tool] = b
-        for i, (label, variable, values) in enumerate((("Contorno", self.outline_mode, ["Cor sólida", "Sem contorno"]), ("Preenchimento", self.fill_mode, ["Sem preenchimento", "Cor sólida"]))):
-            ctk.CTkLabel(shapes, text=label, height=17, font=("Segoe UI", 10)).grid(row=i*2, column=1, padx=3)
-            self.option(shapes, variable, values, 111).grid(row=i*2+1, column=1)
-        size = group("Tamanho")
-        for val in (1, 3, 5, 8):
-            self.button(size, "━━ " + str(val), lambda v=val: self.width.set(v), 54, 20).pack()
-        colors = group("Cores")
-        self.primary_button = self.button(colors, "Cor 1", lambda: self.activate_color(1), 44, 30)
-        self.primary_button.grid(row=0, column=0)
-        self.secondary_button = self.button(colors, "Cor 2", lambda: self.activate_color(2), 44, 30)
-        self.secondary_button.grid(row=1, column=0)
-        for i, color in enumerate(PALETTE):
-            b = ctk.CTkButton(colors, text="", width=16, height=20, fg_color=color, hover_color=color, corner_radius=0, border_width=1, border_color="#aaaaaa", command=lambda c=color: self.set_color(c))
-            b.grid(row=i//10, column=1+i%10, padx=1, pady=1)
-            b.bind("<Button-3>", lambda _e, c=color: self.set_color(c, 2))
-        self.button(colors, "Editar cores", self.choose_color, 80, 24).grid(row=2, column=1, columnspan=5)
-        self.button(colors, "⇄", self.swap_colors, 35, 24).grid(row=2, column=0)
-        self._color_buttons()
-        text_fields = ctk.CTkFrame(self.textbar, fg_color='transparent')
-        text_fields.pack(side='left', padx=20, pady=20)
-        ctk.CTkLabel(text_fields, text='Fonte').grid(row=0, column=0, sticky='w')
-        ctk.CTkOptionMenu(text_fields, variable=self.text_family, values=['Arial', 'Segoe UI', 'Times New Roman', 'Courier New'], command=lambda _v: self.update_text_font(), width=170).grid(row=1, column=0, padx=(0, 12))
-        ctk.CTkLabel(text_fields, text='Tamanho (px)').grid(row=0, column=1, sticky='w')
-        ctk.CTkComboBox(text_fields, variable=self.text_size, values=['12', '16', '20', '24', '32', '48', '72'], width=85, command=lambda _v: self.update_text_font()).grid(row=1, column=1)
-        self.text_size.trace_add('write', lambda *_: self.update_text_font())
-        for label, var in (('Negrito', self.text_bold), ('Itálico', self.text_italic), ('Fundo com Cor 2', self.text_opaque)):
-            ctk.CTkCheckBox(self.textbar, text=label, variable=var, command=self.update_text_font, width=100).pack(side='left', padx=10)
-        self.button(self.textbar, 'Aplicar texto', self.commit_text, 100, 36).pack(side='left', padx=12)
-        self.button(self.textbar, 'Cancelar', self.cancel_text, 80, 36).pack(side='left')
-        for label, cmd in (("Ampliar", lambda: self.change_zoom(.25)), ("Reduzir", lambda: self.change_zoom(-.25)), ("100%", lambda: self.set_zoom(1)), ("Ajustar à janela", self.fit), ("Tela inteira", self.fullscreen)):
-            self.button(self.view, label, cmd, 110, 56).pack(side="left", padx=6, pady=15)
-        for label, var in (("Linhas de grade", self.grid_on), ("Réguas", self.rulers_on), ("Barra de status", self.status_on)):
-            ctk.CTkCheckBox(self.view, text=label, variable=var, command=self.view_options, width=110, font=("Segoe UI", 12)).pack(side="left", padx=8)
-        workspace = ctk.CTkFrame(self, fg_color="#cdd7e4", corner_radius=0)
-        workspace.grid(row=3, column=0, sticky="nsew")
-        workspace.grid_columnconfigure(0, weight=1)
-        workspace.grid_rowconfigure(0, weight=1)
-        self.canvas = tk.Canvas(workspace, bg="#cdd7e4", highlightthickness=0, cursor="crosshair")
-        self.canvas.grid(row=0, column=0, sticky="nsew")
-        self.hscroll = tk.Scrollbar(workspace, orient="horizontal", command=lambda *args: self.scroll("x", *args))
-        self.vscroll = tk.Scrollbar(workspace, command=lambda *args: self.scroll("y", *args))
-        self.hscroll.grid(row=1, column=0, sticky="ew")
-        self.vscroll.grid(row=0, column=1, sticky="ns")
-        self.canvas.configure(xscrollcommand=self.hscroll.set, yscrollcommand=self.vscroll.set)
-        self.canvas.bind("<Configure>", lambda _e: self._render())
-        for num in (1, 3):
-            self.canvas.bind(f"<ButtonPress-{num}>", self.pointer_down)
-            self.canvas.bind(f"<B{num}-Motion>", self.pointer_move)
-            self.canvas.bind(f"<ButtonRelease-{num}>", self.pointer_up)
-        self.canvas.bind("<Motion>", self.pointer_hover)
-        self.canvas.bind("<Double-Button-1>", lambda _e: self.finish_polygon())
-        self.canvas.bind("<MouseWheel>", self.mouse_wheel)
-        self.footer = ctk.CTkFrame(self, height=28, corner_radius=0, fg_color="#f4f5f6")
-        self.footer.grid(row=4, column=0, sticky="ew")
-        self.status = ctk.CTkLabel(self.footer, text="", font=("Segoe UI", 11), height=26)
-        self.status.pack(side="left", padx=12)
-        self.zoom_label = ctk.CTkLabel(self.footer, text="100%", width=50, height=24)
-        self.zoom_slider = ctk.CTkSlider(self.footer, from_=10, to=800, width=140, command=lambda v: self.set_zoom(float(v)/100))
-        self.button(self.footer, "+", lambda: self.change_zoom(.25), 24, 24).pack(side="right")
-        self.zoom_slider.pack(side="right", padx=5)
-        self.button(self.footer, "−", lambda: self.change_zoom(-.25), 24, 24).pack(side="right")
-        self.zoom_label.pack(side="right", padx=8)
 
     def option(self, parent, variable, values, width, command=None):
-        return ctk.CTkOptionMenu(parent, values=values, variable=variable, command=command, width=width, height=22, font=("Segoe UI", 10), fg_color="#e4e8ed", text_color="#222222", button_color="#ccd5df")
+        return ctk.CTkOptionMenu(parent, values=values, variable=variable, command=command, width=width, height=27, corner_radius=5, font=("Segoe UI", 11), fg_color="#f1f5f9", text_color="#334155", button_color="#e2e8f0", button_hover_color='#d0ddf0', dropdown_fg_color='white', dropdown_text_color='#334155')
 
     def tooltip(self, widget, text):
         state = {"tip": None, "timer": None}
@@ -230,6 +118,14 @@ class PaintPro(ctk.CTk):
         self.bind("<F11>", lambda _e: self.fullscreen())
         self.bind("<Control-plus>", lambda _e: self.change_zoom(.25))
         self.bind("<Control-minus>", lambda _e: self.change_zoom(-.25))
+        self.bind('<KeyPress-space>', self.press_space)
+        self.bind('<KeyRelease-space>', self.release_space)
+        self.bind('<FocusOut>', lambda _e: self.release_space())
+        self.canvas.bind('<ButtonPress-2>', self.pan_start)
+        self.canvas.bind('<B2-Motion>', self.pan_move)
+        self.canvas.bind('<ButtonRelease-2>', self.pan_end)
+        for key, dx, dy in [('Left', -1, 0), ('Right', 1, 0), ('Up', 0, -1), ('Down', 0, 1)]:
+            self.bind(f'<{key}>', lambda e, x=dx, y=dy: self.nudge_selection(e, x, y))
 
     def shortcut(self, event, key, action):
         # Keep native editing shortcuts inside text fields and canvas text boxes.
@@ -243,6 +139,8 @@ class PaintPro(ctk.CTk):
         self.view.pack_forget()
         self.textbar.pack_forget()
         {'home': self.home, 'view': self.view, 'text': self.textbar}[tab].pack(fill='both', expand=True)
+        for name, button in getattr(self, 'tab_buttons', {}).items():
+            button.configure(fg_color='#e8f0ff' if name == tab else 'transparent', text_color='#2563eb' if name == tab else '#334155')
 
     def menu(self, entries):
         menu = tk.Menu(self, tearoff=False)
@@ -297,14 +195,14 @@ class PaintPro(ctk.CTk):
         self.cancel()
         self.tool = tool
         for name, button in self.tool_buttons.items():
-            button.configure(fg_color="#c9e5f9" if name == tool else "transparent")
+            button.configure(fg_color='#e8f0ff' if name == tool else 'transparent', text_color='#2563eb' if name == tool else '#334155')
         self.canvas.configure(cursor="xterm" if tool == "text" else "crosshair")
         self._render()
         if tool == 'text': self.show_tab('text')
 
     @property
     def origin(self):
-        return 25 if self.rulers_on.get() else 6
+        return 36 if self.rulers_on.get() else 20
 
     def _canvas_point(self, event, clamp=True):
         x = math.floor((self.canvas.canvasx(event.x)-self.origin)/self.zoom)
@@ -313,6 +211,9 @@ class PaintPro(ctk.CTk):
         return max(0, min(self.image.width-1, x)), max(0, min(self.image.height-1, y))
 
     def pointer_down(self, event):
+        if self.space_down:
+            self.pan_start(event)
+            return
         point = self._canvas_point(event, False)
         if point is None: return
         self.commit_text()
@@ -360,8 +261,13 @@ class PaintPro(ctk.CTk):
         if self.tool in ("brush", "pencil", "eraser"): self.pointer_move(event)
 
     def pointer_move(self, event):
+        if self.panning:
+            self.pan_move(event)
+            return
         if self.last is None: return
         point = self._canvas_point(event)
+        if self.tool in SHAPES and self.tool not in ('curve', 'polygon') and getattr(event, 'state', 0) & 1:
+            point = self.constrain_point(self.start, point)
         if self.tool in ("brush", "pencil", "eraser"):
             draw = ImageDraw.Draw(self.image)
             width = 1 if self.tool == "pencil" else self.width.get()
@@ -400,6 +306,9 @@ class PaintPro(ctk.CTk):
         self._render()
 
     def pointer_up(self, event):
+        if self.panning:
+            self.pan_end(event)
+            return
         if self.start is None: return
         self.pointer_move(event)
         if self.tool == "curve" and not self.curve_stage:
@@ -427,6 +336,9 @@ class PaintPro(ctk.CTk):
         self._render()
 
     def pointer_hover(self, event):
+        point = self._canvas_point(event, False)
+        if hasattr(self, 'position_label'):
+            self.position_label.configure(text=f'{point[0]}, {point[1]} px' if point else '')
         if self.path_points:
             self.canvas.delete("polygon_preview")
             coords = [self.origin+c*self.zoom for p in self.path_points+[self._canvas_point(event)] for c in p]
@@ -457,6 +369,75 @@ class PaintPro(ctk.CTk):
     def escape(self):
         self.attributes("-fullscreen", False)
         self.cancel()
+        self.release_space()
+
+    def constrain_point(self, start, end):
+        dx, dy = end[0]-start[0], end[1]-start[1]
+        if self.tool == 'line':
+            angle = round(math.atan2(dy, dx)/(math.pi/4))*math.pi/4
+            length = math.hypot(dx, dy)
+            return (max(0, min(self.image.width-1, round(start[0]+math.cos(angle)*length))),
+                    max(0, min(self.image.height-1, round(start[1]+math.sin(angle)*length))))
+        sx, sy = 1 if dx >= 0 else -1, 1 if dy >= 0 else -1
+        size = min(max(abs(dx), abs(dy)), self.image.width-1-start[0] if sx > 0 else start[0], self.image.height-1-start[1] if sy > 0 else start[1])
+        return start[0]+sx*size, start[1]+sy*size
+
+    def press_space(self, event):
+        if isinstance(event.widget, (tk.Text, tk.Entry)): return
+        self.space_down = True
+        self.canvas.configure(cursor='hand2')
+        return 'break'
+
+    def release_space(self, event=None):
+        self.space_down = False
+        if hasattr(self, 'canvas'):
+            self.canvas.configure(cursor='xterm' if self.tool == 'text' else 'crosshair')
+
+    def pan_start(self, event):
+        if self.start is not None: return
+        self.panning = True
+        self.canvas.scan_mark(event.x, event.y)
+        self.canvas.configure(cursor='fleur')
+
+    def pan_move(self, event):
+        if self.panning:
+            self.canvas.scan_dragto(event.x, event.y, gain=1)
+            self._render()
+
+    def pan_end(self, event=None):
+        self.panning = False
+        self.canvas.configure(cursor='hand2' if self.space_down else 'xterm' if self.tool == 'text' else 'crosshair')
+
+    def nudge_selection(self, event, dx, dy):
+        if isinstance(event.widget, (tk.Text, tk.Entry)) or not self.selection: return
+        step = 10 if getattr(event, 'state', 0) & 1 else 1
+        box = self.selection
+        dx = max(-box[0], min(self.image.width-box[2], dx*step))
+        dy = max(-box[1], min(self.image.height-box[3], dy*step))
+        if dx == 0 and dy == 0: return 'break'
+        self.doc.snapshot()
+        content = self.image.crop(box)
+        ImageDraw.Draw(self.image).rectangle((box[0], box[1], box[2]-1, box[3]-1), fill=self.secondary)
+        self.image.paste(content, (box[0]+dx, box[1]+dy))
+        self.selection = box[0]+dx, box[1]+dy, box[2]+dx, box[3]+dy
+        self._render()
+        return 'break'
+
+    def show_help(self):
+        if self._help_window and self._help_window.winfo_exists():
+            self._help_window.lift()
+            return
+        win = self._help_window = ctk.CTkToplevel(self)
+        win.title('Atalhos — Paint Pro')
+        win.geometry('540x460')
+        win.transient(self)
+        ctk.CTkLabel(win, text='Desenhe com mais fluidez', font=('Segoe UI', 22, 'bold')).pack(pady=(24, 6))
+        ctk.CTkLabel(win, text='Ferramentas à mão. Espaço para criar.', text_color='#65748a').pack()
+        text = ctk.CTkTextbox(win, fg_color='#f1f5f9', corner_radius=10, font=('Segoe UI', 13), wrap='word')
+        text.pack(fill='both', expand=True, padx=24, pady=18)
+        text.insert('1.0', 'Ctrl+N / Ctrl+O       Novo / abrir\nCtrl+S                       Salvar\nCtrl+Shift+S             Salvar como\nCtrl+Z / Ctrl+Y         Desfazer / refazer\nCtrl+A                       Selecionar tudo\nCtrl+C / X / V           Copiar / recortar / colar\nShift + arrastar        Formas regulares e linhas a 45°\nEspaço + arrastar    Mover a tela\nCtrl + roda               Zoom no cursor\nSetas / Shift+setas   Mover seleção em 1 / 10 px\nCtrl+Enter                Aplicar texto\nEnter                          Fechar polígono\nEsc                              Cancelar / sair da tela inteira\nF11                              Tela inteira')
+        text.configure(state='disabled')
+        ctk.CTkButton(win, text='Voltar a desenhar', command=win.destroy, width=180).pack(pady=(0, 18))
 
     def add_text(self, point):
         self.text_point = point
@@ -605,6 +586,7 @@ class PaintPro(ctk.CTk):
         w, h = max(1, round(self.image.width*self.zoom)), max(1, round(self.image.height*self.zoom))
         self.canvas.configure(scrollregion=(0, 0, w+origin+10, h+origin+10))
         self.canvas.delete("all")
+        self.canvas.create_rectangle(origin+4, origin+4, origin+w+5, origin+h+5, fill='#c8d3e2', outline='')
         # Render only the viewport, avoiding huge bitmaps at 800% zoom.
         left = max(0, int((self.canvas.canvasx(0)-origin)/self.zoom))
         top = max(0, int((self.canvas.canvasy(0)-origin)/self.zoom))
@@ -618,14 +600,20 @@ class PaintPro(ctk.CTk):
             if self.grid_on.get() and self.zoom >= 4:
                 for x in range(left, right): self.canvas.create_line(origin+x*self.zoom, origin+top*self.zoom, origin+x*self.zoom, origin+bottom*self.zoom, fill="#d4d4d4")
                 for y in range(top, bottom): self.canvas.create_line(origin+left*self.zoom, origin+y*self.zoom, origin+right*self.zoom, origin+y*self.zoom, fill="#d4d4d4")
-        self.canvas.create_rectangle(origin-1, origin-1, origin+w, origin+h, outline="#919aa5")
-        if self.selection: self.canvas.create_rectangle(*(origin+c*self.zoom for c in self.selection), outline="#1477cf", dash=(4, 3))
+        self.canvas.create_rectangle(origin-1, origin-1, origin+w, origin+h, outline='#bdc9d9')
+        if self.selection:
+            coords = tuple(origin+c*self.zoom for c in self.selection)
+            self.canvas.create_rectangle(*coords, outline='white', width=2)
+            self.canvas.create_rectangle(*coords, outline='#2563eb', dash=(5, 3))
         if self.rulers_on.get():
             for x in range(left//100*100, right, 100): self.canvas.create_text(origin+x*self.zoom, self.canvas.canvasy(10), text=str(x), fill="#535d68", anchor="w", font=("Segoe UI", 8))
             for y in range(top//100*100, bottom, 100): self.canvas.create_text(self.canvas.canvasx(3), origin+y*self.zoom, text=str(y), fill="#535d68", anchor="w", font=("Segoe UI", 8))
         tool = TOOLS.get(self.tool, SHAPES.get(self.tool, self.tool))
         hint = " • clique nos vértices; Enter fecha" if self.tool == "polygon" else " • arraste para curvar" if self.curve_stage else ""
         self.status.configure(text=f"{self.image.width} × {self.image.height} px     |     {tool}{hint}")
+        if self.selection:
+            box = self.selection
+            self.status.configure(text=f'{self.image.width} × {self.image.height} px     |     Seleção {box[2]-box[0]} × {box[3]-box[1]} px')
         self.zoom_label.configure(text=f"{round(self.zoom*100)}%")
         self.zoom_slider.set(self.zoom*100)
         self.undo_button.configure(state='normal' if self.doc.undo_stack else 'disabled')
@@ -634,14 +622,32 @@ class PaintPro(ctk.CTk):
             x, y = self.text_point
             self.canvas.create_window(origin+x*self.zoom, origin+y*self.zoom, window=self.text_editor, anchor='nw',
                                       width=max(30, min(420, (self.image.width-x)*self.zoom)), height=max(30, min(180, (self.image.height-y)*self.zoom)))
-        self.title(f"{Path(self.doc.path).name if self.doc.path else 'Sem título'} — Paint Pro")
+        self.refresh_chrome(tool)
+
+    def refresh_chrome(self, tool):
+        active = self.start is not None or self.curve_stage or bool(self.path_points)
+        signature = (id(self.image), len(self.doc.undo_stack), len(self.doc.redo_stack), id(self.doc.saved), active)
+        if signature != self._chrome_signature:
+            self._dirty_display = True if active else self.doc.dirty
+            self._chrome_signature = signature
+        name = Path(self.doc.path).name if self.doc.path else 'Sem título'
+        self.filename_label.configure(text=name if len(name) <= 35 else name[:32]+'…')
+        editing = self.text_editor is not None
+        self.saved_label.configure(text='Texto em edição' if editing else 'Alterações não salvas' if self._dirty_display else 'Salvo' if self.doc.path else 'Novo desenho',
+                                   text_color='#9a6700' if editing or self._dirty_display else '#65748a', fg_color='#fff7df' if editing or self._dirty_display else '#f1f5f9')
+        self.tool_label.configure(text=tool)
+        for button in self.selection_buttons:
+            button.configure(state='normal' if self.selection else 'disabled')
+        marker = ' *' if self._dirty_display or editing else ''
+        self.title(f'{name}{marker} — Paint Pro 0.5')
 
     def scroll(self, axis, *args):
         (self.canvas.xview if axis == "x" else self.canvas.yview)(*args)
         self._render()
 
     def mouse_wheel(self, event):
-        if event.state & 4: self.change_zoom(.25 if event.delta > 0 else -.25)
+        if event.state & 4:
+            self.zoom_at(self.zoom*(1.2 if event.delta > 0 else 1/1.2), event.x, event.y)
         else: self.scroll("y", "scroll", -1 if event.delta > 0 else 1, "units")
         return "break"
 
@@ -652,10 +658,20 @@ class PaintPro(ctk.CTk):
 
     def change_zoom(self, delta): self.set_zoom(self.zoom+delta)
 
+    def zoom_at(self, value, x, y):
+        point_x = (self.canvas.canvasx(x)-self.origin)/self.zoom
+        point_y = (self.canvas.canvasy(y)-self.origin)/self.zoom
+        self.set_zoom(value)
+        extent_x = max(1, round(self.image.width*self.zoom)+self.origin+10)
+        extent_y = max(1, round(self.image.height*self.zoom)+self.origin+10)
+        self.canvas.xview_moveto((point_x*self.zoom+self.origin-x)/extent_x)
+        self.canvas.yview_moveto((point_y*self.zoom+self.origin-y)/extent_y)
+        self._render()
+
     def fit(self):
         self.canvas.xview_moveto(0)
         self.canvas.yview_moveto(0)
-        self.set_zoom(min((self.canvas.winfo_width()-40)/self.image.width, (self.canvas.winfo_height()-40)/self.image.height))
+        self.set_zoom(min((self.canvas.winfo_width()-self.origin*2-10)/self.image.width, (self.canvas.winfo_height()-self.origin*2-10)/self.image.height))
 
     def view_options(self):
         if self.status_on.get(): self.footer.grid()

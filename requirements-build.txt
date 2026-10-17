@@ -1,0 +1,2 @@
+# Optional packaging tools; not required to run Paint Pro from source.
+pyinstaller>=6.16,<7

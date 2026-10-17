@@ -1,5 +1,7 @@
 """Raster operations and history, independent of the desktop interface."""
 import math
+import os
+import tempfile
 from pathlib import Path
 from PIL import Image, ImageDraw, ImageOps
 
@@ -116,9 +118,19 @@ class Document:
         self.redo_stack.clear()
 
     def save(self, path):
-        if Path(path).suffix.lower() not in (".png", ".jpg", ".jpeg", ".bmp"):
+        target = Path(path).resolve()
+        if target.suffix.lower() not in (".png", ".jpg", ".jpeg", ".bmp"):
             raise ValueError("Use PNG, JPG, JPEG ou BMP.")
-        self.image.save(path, quality=95)
+        # Write beside the destination, then replace it only after encoding succeeds.
+        # A failed export must not truncate the user's previously saved drawing.
+        temporary = None
+        try:
+            with tempfile.NamedTemporaryFile(prefix='.paintpro-', suffix=target.suffix, dir=target.parent, delete=False) as handle:
+                temporary = Path(handle.name)
+            self.image.save(temporary, quality=95)
+            os.replace(temporary, target)
+        finally:
+            if temporary is not None and temporary.exists(): temporary.unlink()
         self.saved, self.path = self.image.copy(), str(path)
 
     def resize(self, size):

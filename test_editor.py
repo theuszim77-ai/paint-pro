@@ -10,6 +10,20 @@ from classic import PaintPro
 
 
 class DocumentTests(unittest.TestCase):
+    def test_failed_export_preserves_existing_file(self):
+        with tempfile.TemporaryDirectory() as temp:
+            path = Path(temp) / 'drawing.png'
+            doc = Document((20, 20))
+            doc.save(path)
+            original = path.read_bytes()
+            doc.snapshot()
+            doc.image.putpixel((2, 2), (255, 0, 0))
+            with patch('PIL.Image.Image.save', side_effect=OSError('Disk full')):
+                with self.assertRaises(OSError): doc.save(path)
+            self.assertEqual(path.read_bytes(), original)
+            self.assertTrue(doc.dirty)
+            self.assertEqual(sorted(p.name for p in Path(temp).iterdir()), ['drawing.png'])
+
     def test_history_branch_and_saved_state(self):
         doc = Document((40, 30))
         doc.snapshot()
@@ -226,6 +240,63 @@ class EditorTests(unittest.TestCase):
         a.color = '#ffffff'
         self.gesture('fill')
         self.assertEqual(len(a.doc.redo_stack), 1)
+
+    def test_studio_tabs_dirty_state_and_selection_buttons(self):
+        a = self.app
+        a._chrome_signature = None
+        a._render()
+        self.assertNotIn('*', a.title())
+        self.assertTrue(all(b.cget('state') == 'disabled' for b in a.selection_buttons))
+        self.gesture('brush')
+        self.assertIn('*', a.title())
+        a.undo()
+        self.assertNotIn('*', a.title())
+        a.select_all()
+        self.assertTrue(all(b.cget('state') == 'normal' for b in a.selection_buttons))
+        a.show_tab('view')
+        self.assertEqual(a.tab_buttons['view'].cget('fg_color'), '#e8f0ff')
+
+    def test_shift_constraints_and_selection_nudge(self):
+        a = self.app
+        a.select_tool('rectangle')
+        a.pointer_down(self.event(100, 100))
+        e = self.event(150, 125)
+        e.state = 1
+        a.pointer_move(e)
+        a.pointer_up(e)
+        self.assertEqual(a.image.getpixel((150, 150)), (0, 0, 0))
+        a.selection = (100, 100, 151, 151)
+        event = SimpleNamespace(widget=a.canvas, state=1)
+        a.nudge_selection(event, 1, 0)
+        self.assertEqual(a.selection, (110, 100, 161, 151))
+        a.undo()
+        self.assertEqual(a.image.getpixel((100, 100)), (0, 0, 0))
+
+    def test_zoom_anchor_pan_and_narrow_ribbon(self):
+        a = self.app
+        a.set_zoom(2)
+        a.scroll('x', 'moveto', .1)
+        a.scroll('y', 'moveto', .1)
+        event = SimpleNamespace(x=300, y=220, state=4, delta=120)
+        before = a._canvas_point(event)
+        a.zoom_at(3, event.x, event.y)
+        after = a._canvas_point(event)
+        self.assertLessEqual(abs(before[0]-after[0]), 1)
+        self.assertLessEqual(abs(before[1]-after[1]), 1)
+        a.press_space(SimpleNamespace(widget=a.canvas))
+        a.pointer_down(SimpleNamespace(x=200, y=200))
+        self.assertTrue(a.panning)
+        a.pointer_move(SimpleNamespace(x=150, y=140))
+        a.pointer_up(SimpleNamespace(x=150, y=140))
+        a.release_space()
+        self.assertFalse(a.panning)
+        self.assertFalse(a.doc.dirty)
+        a.geometry('980x620')
+        a.update()
+        self.assertTrue(a.home.winfo_ismapped())
+        self.assertGreater(a.canvas.winfo_height(), 200)
+        a.geometry('1320x850')
+        a.update()
 
 
 if __name__ == '__main__':
