@@ -32,3 +32,27 @@ jobs:
       - run: node scripts/dev.mjs package
         env:
           PAINT_PRO_PYTHON: python
+  windows-portable:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: python -m pip install -r requirements.txt -r requirements-build.txt
+      - run: node scripts/dev.mjs build-native
+      - run: node scripts/dev.mjs build-exe
+      - name: Smoke test the packaged application
+        shell: pwsh
+        run: |
+          $testProcess = Start-Process -FilePath 'dist/PaintPro/PaintPro.exe' -ArgumentList '--smoke-test','--require-native','--report','build/smoke.json' -PassThru -WindowStyle Hidden
+          if (-not $testProcess.WaitForExit(60000)) { $testProcess.Kill(); throw 'Packaged application timed out' }
+          Get-Content build/smoke.json
+          if ($testProcess.ExitCode -ne 0) { throw 'Packaged application failed its smoke test' }
+      - uses: actions/upload-artifact@v4
+        with:
+          name: PaintPro-Windows
+          path: dist/PaintPro-Windows.zip
