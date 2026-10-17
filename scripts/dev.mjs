@@ -1,13 +1,13 @@
 #!/usr/bin/env node
 // No npm dependencies. Spawn programs with argument arrays, never a shell string.
 import { spawnSync } from 'node:child_process';
-import { mkdirSync } from 'node:fs';
+import { mkdirSync, existsSync, copyFileSync } from 'node:fs';
 import { dirname, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 export const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 export const python = process.env.PAINT_PRO_PYTHON || (process.platform === 'win32' ? 'python' : 'python3');
-export const commands = ['start', 'test', 'test-js', 'doctor', 'build-native', 'package', 'help'];
+export const commands = ['start', 'test', 'test-js', 'doctor', 'build-native', 'build-exe', 'package', 'help'];
 
 export function run(program, args, options = {}) {
   const result = spawnSync(program, args, { cwd: root, stdio: 'inherit', shell: false, ...options });
@@ -21,8 +21,8 @@ export function isSourceFile(path) {
   const normalized = path.split(sep).join('/');
   if (normalized.split('/').some(part => part.startsWith('.') && !['.github', '.gitignore'].includes(part))) return false;
   if (normalized.split('/').some(part => ['__pycache__', 'node_modules', 'build', 'bin', 'dist'].includes(part))) return false;
-  return ['app.py', 'classic.py', 'document.py', 'native_backend.py', 'clipboard_bridge.py', 'editor_dialogs.py', 'test_editor.py', 'test_native.py', 'test_clipboard.py',
-    'requirements.txt', 'README.md', 'LICENSE', '.gitignore', 'package.json'].includes(normalized)
+  return ['app.py', 'Paint Pro.pyw', 'classic.py', 'document.py', 'studio_ui.py', 'ui_icons.py', 'native_backend.py', 'clipboard_bridge.py', 'editor_dialogs.py', 'test_editor.py', 'test_native.py', 'test_clipboard.py',
+    'requirements.txt', 'requirements-build.txt', 'README.md', 'LICENSE', '.gitignore', 'package.json'].includes(normalized)
     || /^(scripts\/[^/]+\.mjs|native\/(paintpro\.cpp|CMakeLists\.txt)|\.github\/workflows\/ci\.yml)$/.test(normalized);
 }
 
@@ -44,6 +44,18 @@ export function main(command = 'help') {
     run('cmake', ['-S', 'native', '-B', 'build/native', '-DCMAKE_BUILD_TYPE=Release']);
     run('cmake', ['--build', 'build/native', '--config', 'Release']);
     run(python, ['-c', "from native_backend import backend_name; assert backend_name() == 'C++17', 'Biblioteca compilada não carregou'; print('C++17 carregado com sucesso')"]);
+  } else if (command === 'build-exe') {
+    if (process.platform !== 'win32') throw new Error('Compile o executável Windows em um computador Windows.');
+    mkdirSync(resolve(root, 'build'), { recursive: true });
+    run(python, ['-c', "from ui_icons import icon; icon('palette','#2563eb',256).save('build/paint-pro.ico',sizes=[(16,16),(32,32),(48,48),(64,64),(128,128),(256,256)])"]);
+    const args = ['-m', 'PyInstaller', '--noconfirm', '--clean', '--windowed', '--onedir', '--name', 'PaintPro', '--icon', 'build/paint-pro.ico', '--collect-all', 'customtkinter'];
+    const native = resolve(root, 'native', 'bin', 'paintpro_native.dll');
+    if (existsSync(native)) args.push('--add-binary', `${native};native/bin`);
+    args.push('app.py');
+    run(python, args);
+    copyFileSync(resolve(root, 'LICENSE'), resolve(root, 'dist/PaintPro/LICENSE'));
+    run(python, ['-c', "from pathlib import Path; import zipfile; base=Path('dist/PaintPro'); z=zipfile.ZipFile('dist/PaintPro-Windows.zip','w',zipfile.ZIP_DEFLATED); [z.write(p,Path('PaintPro')/p.relative_to(base)) for p in base.rglob('*') if p.is_file()]; z.close()"]);
+    console.log('Pronto: dist/PaintPro/PaintPro.exe. Mantenha a pasta _internal ao lado do executável.');
   } else if (command === 'package') {
     const tracked = run('git', ['ls-files', '-z', '--cached', '--others', '--exclude-standard'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'inherit'] });
     const files = [...new Set(tracked.stdout.split('\0').filter(Boolean).filter(isSourceFile))].sort();
